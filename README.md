@@ -24,13 +24,13 @@ O grafo é composto por 4 tipos principais de nós:
 ### Nós (Nodes)
 
 - **Requirement**: Requisitos funcionais/não-funcionais
-  - Propriedades: `req_id`, `text`, `summary`, `type`, `source`, `domain`, `embedding`, etc.
+  - Propriedades: `req_id`, `text`, `summary`, `source`, `embedding`, etc.
 - **Technique**: Técnicas de engenharia de requisitos (elicitação, especificação, validação)
   - Propriedades: `tech_id`, `name`, `description`, `category`, `source`, `embedding`, etc.
 - **Instruction**: Diretrizes e boas práticas
   - Propriedades: `instr_id`, `text`, `context`, `source`, `embedding`, etc.
 - **Concept**: Conceitos fundamentais
-  - Propriedades: `concept_id`, `name`, `definition`, `source`, `embedding`, etc.
+  - Propriedades: `concept_id`, `name`, `text`, `source`, `embedding`, etc.
 
 ### Relacionamentos (Relationships)
 
