@@ -15,6 +15,9 @@ frontend/.vite/
 # Ambiente
 .env
 
+# DSPy — estado compilado gerado localmente
+backend/compiled_agent.json
+
 # Sistema
 .DS_Store
 Thumbs.db
