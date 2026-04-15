@@ -8,7 +8,7 @@ O projeto é parte do TCC (Trabalho de Conclusão de Curso) de 2025.2, com foco 
 
 ## Tecnologias Utilizadas
 
-- **Python 3.7+**: Linguagem principal para desenvolvimento
+- **Python +**: Linguagem principal para desenvolvimento
 - **Neo4j**: Banco de dados de grafos para armazenamento e consultas
 - **Cypher**: Linguagem de consulta do Neo4j
 - **Docker**: Containerização do Neo4j para desenvolvimento
