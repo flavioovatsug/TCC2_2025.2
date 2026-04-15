@@ -1,0 +1,149 @@
+.graph-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: #0a0a0f;
+  position: relative;
+  overflow: hidden;
+}
+
+.graph-loading,
+.graph-error {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #888;
+  gap: 16px;
+  font-size: 14px;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #222;
+  border-top-color: #4f8ef7;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Toolbar */
+.graph-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: rgba(15, 15, 25, 0.95);
+  border-bottom: 1px solid #1e1e2e;
+  z-index: 10;
+  flex-shrink: 0;
+}
+
+.graph-stats {
+  font-size: 12px;
+  color: #666;
+}
+
+.highlight-badge {
+  color: #4f8ef7;
+}
+
+.filter-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.filter-btn {
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--color, #555);
+  background: transparent;
+  color: #999;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.filter-btn.active {
+  background: var(--color, #555);
+  color: white;
+}
+
+.filter-btn:hover {
+  opacity: 0.85;
+}
+
+/* Node detail panel */
+.node-detail {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(15, 15, 30, 0.97);
+  border-top: 1px solid #2a2a4a;
+  padding: 12px 16px;
+  font-size: 13px;
+  color: #ccc;
+  z-index: 20;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.node-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.node-type-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: white;
+}
+
+.community-badge {
+  font-size: 11px;
+  color: #aaa;
+  background: #222;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.close-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+}
+
+.close-btn:hover {
+  color: #ccc;
+}
+
+.node-detail-text {
+  margin: 0 0 4px;
+  color: #ddd;
+  line-height: 1.4;
+}
+
+.node-detail-summary {
+  margin: 0;
+  color: #999;
+  font-size: 12px;
+  line-height: 1.4;
+}
