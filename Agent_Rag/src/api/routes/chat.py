@@ -10,10 +10,17 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from backend import agent as agent_module
+from src.service.chat_service import ChatService
 
 router = APIRouter()
 _executor = ThreadPoolExecutor(max_workers=4)
+
+_chat_service: ChatService = None  # type: ignore
+
+
+def init(chat_service: ChatService):
+    global _chat_service
+    _chat_service = chat_service
 
 
 class ChatRequest(BaseModel):
@@ -30,7 +37,7 @@ async def chat_stream(request: ChatRequest):
 
         try:
             answer, node_ids = await loop.run_in_executor(
-                _executor, agent_module.ask, request.question
+                _executor, _chat_service.answer, request.question
             )
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
