@@ -4,8 +4,9 @@ Queries Cypher isoladas — todas as strings ficam aqui.
 
 SEARCH_REQUIREMENTS = """
 MATCH (r:Requirement)
-WHERE any(kw IN $keywords WHERE toLower(r.text) CONTAINS kw)
-   OR any(kw IN $keywords WHERE toLower(r.summary) CONTAINS kw)
+WHERE (any(kw IN $keywords WHERE toLower(r.text) CONTAINS kw)
+   OR any(kw IN $keywords WHERE toLower(r.summary) CONTAINS kw))
+  AND ($graph_id = '' OR r.graph_id = $graph_id)
 WITH r,
      size([kw IN $keywords WHERE toLower(r.text) CONTAINS kw]) +
      size([kw IN $keywords WHERE toLower(r.summary) CONTAINS kw]) AS score
@@ -75,6 +76,7 @@ CREATE (r:Requirement {
     req_id: $req_id, text: $text, summary: $summary,
     type: $type, source: $source, domain: $domain,
     embedding: $embedding, embedding_model: $embedding_model,
+    graph_id: $graph_id,
     embedding_ts: datetime(), created_at: datetime()
 })
 """
@@ -112,14 +114,17 @@ OPTIONS {indexConfig: {
 
 GET_GRAPH_NODES_REQUIREMENTS = """
 MATCH (r:Requirement)
+WHERE $graph_id = '' OR r.graph_id = $graph_id
 RETURN r.req_id AS id, r.text AS text, r.summary AS summary,
        r.type AS type, r.domain AS domain, r.communityId AS communityId
 ORDER BY r.req_id LIMIT $limit
 """
 
 GET_GRAPH_RELATIONSHIPS = """
-MATCH (a)-[r]->(b) WHERE type(r) <> 'SIMILAR_TO'
-RETURN coalesce(a.req_id, a.tech_id, a.instr_id, a.concept_id) AS source,
+MATCH (req:Requirement)-[r]->(b)
+WHERE type(r) <> 'SIMILAR_TO'
+  AND ($graph_id = '' OR req.graph_id = $graph_id)
+RETURN req.req_id AS source,
        coalesce(b.req_id, b.tech_id, b.instr_id, b.concept_id) AS target,
        type(r) AS type
 LIMIT 2000
@@ -127,5 +132,43 @@ LIMIT 2000
 
 GET_SIMILAR_TO_SAMPLE = """
 MATCH (a:Requirement)-[:SIMILAR_TO]->(b:Requirement)
+WHERE ($graph_id = '' OR a.graph_id = $graph_id)
 RETURN a.req_id AS source, b.req_id AS target LIMIT 300
+"""
+
+# --- Gestão de grafos múltiplos ---
+
+LIST_GRAPHS = """
+MATCH (g:Graph)
+OPTIONAL MATCH (n) WHERE n.graph_id = g.graph_id AND NOT 'Graph' IN labels(n)
+WITH g, count(n) AS node_count
+RETURN g.graph_id AS graph_id, g.name AS name, node_count
+ORDER BY g.created_at
+"""
+
+SET_MISSING_GRAPH_IDS = """
+MATCH (n) WHERE n.graph_id IS NULL AND NOT 'Graph' IN labels(n)
+SET n.graph_id = $graph_id
+"""
+
+CREATE_GRAPH_META = """
+MERGE (g:Graph {graph_id: $graph_id})
+ON CREATE SET g.created_at = datetime(), g.name = $name
+ON MATCH SET g.name = $name, g.updated_at = datetime()
+"""
+
+COUNT_NODES_FOR_GRAPH = """
+MATCH (n:Requirement {graph_id: $graph_id})
+RETURN count(n) AS c
+"""
+
+SAMPLE_REQUIREMENTS_FOR_GRAPH = """
+MATCH (r:Requirement)
+WHERE (r.graph_id = 'default' OR r.graph_id IS NULL)
+  AND ($keywords = [] OR any(kw IN $keywords WHERE toLower(r.text) CONTAINS kw
+                              OR toLower(coalesce(r.domain,'')) CONTAINS kw))
+WITH r ORDER BY rand()
+LIMIT $limit
+RETURN r.req_id AS req_id, r.text AS text, r.summary AS summary,
+       r.type AS type, r.domain AS domain
 """

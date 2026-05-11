@@ -6,6 +6,8 @@ import "./GraphPanel.css";
 
 interface Props {
   highlightedNodeIds: string[];
+  graphId: string;
+  refreshSignal?: number;
 }
 
 const NODE_COLORS: Record<string, string> = {
@@ -37,7 +39,11 @@ const LINK_COLORS: Record<string, string> = {
 
 type FilterState = Record<string, boolean>;
 
-export default function GraphPanel({ highlightedNodeIds }: Props) {
+export default function GraphPanel({
+  highlightedNodeIds,
+  graphId,
+  refreshSignal,
+}: Props) {
   const [graphData, setGraphData] = useState<GraphData>({
     nodes: [],
     links: [],
@@ -53,6 +59,7 @@ export default function GraphPanel({ highlightedNodeIds }: Props) {
     SIMILAR_TO: false,
   });
   const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 600, height: 500 });
   const highlightSet = useMemo(
     () => new Set(highlightedNodeIds),
@@ -61,7 +68,9 @@ export default function GraphPanel({ highlightedNodeIds }: Props) {
 
   // Load graph data
   useEffect(() => {
-    fetchGraph(200)
+    setLoading(true);
+    setError(null);
+    fetchGraph(200, graphId)
       .then((data) => {
         setGraphData(data);
         setLoading(false);
@@ -70,15 +79,15 @@ export default function GraphPanel({ highlightedNodeIds }: Props) {
         setError(err.message);
         setLoading(false);
       });
-  }, []);
+  }, [graphId, refreshSignal]);
 
-  // Resize observer
+  // Resize observer — mede a área do canvas (sem a toolbar)
   useEffect(() => {
-    const el = containerRef.current;
+    const el = canvasRef.current;
     if (!el) return;
     const observer = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
-      setDimensions({ width, height: height - 120 }); // leave room for footer
+      setDimensions({ width, height });
     });
     observer.observe(el);
     return () => observer.disconnect();
@@ -213,23 +222,19 @@ export default function GraphPanel({ highlightedNodeIds }: Props) {
       <div className="graph-panel graph-error">
         <p style={{ fontSize: 32, marginBottom: 8 }}>◈</p>
         <p style={{ color: "#ccc", marginBottom: 6 }}>Grafo vazio</p>
-        <p style={{ fontSize: 12, textAlign: "center", maxWidth: 340 }}>
-          O Neo4j está conectado mas sem dados.
-          <br />
-          Execute o script para popular o grafo:
-        </p>
-        <code
+        <p
           style={{
-            background: "#1a1a1a",
-            padding: "8px 14px",
-            borderRadius: 6,
             fontSize: 12,
-            marginTop: 10,
-            color: "#4f8ef7",
+            textAlign: "center",
+            maxWidth: 340,
+            color: "#666",
           }}
         >
-          python Knowledge_Graphs/graph_creator.py
-        </code>
+          Use o chat para criar requisitos.
+          <br />
+          Exemplo:{" "}
+          <em style={{ color: "#4f8ef7" }}>"Adicione requisito de login"</em>
+        </p>
       </div>
     );
   }
@@ -272,32 +277,37 @@ export default function GraphPanel({ highlightedNodeIds }: Props) {
       </div>
 
       {/* Force Graph */}
-      <ForceGraph2D
-        graphData={filteredData as any}
-        width={dimensions.width}
-        height={dimensions.height}
-        backgroundColor="#0a0a0f"
-        nodeId="id"
-        nodeLabel={(n: any) => `[${n.label}] ${n.name || n.id}`}
-        nodeCanvasObject={paintNode as any}
-        nodePointerAreaPaint={(node: any, color, ctx) => {
-          const r = (NODE_SIZES[node.label] ?? 5) * 2;
-          ctx.beginPath();
-          ctx.arc(node.x ?? 0, node.y ?? 0, r, 0, Math.PI * 2);
-          ctx.fillStyle = color;
-          ctx.fill();
-        }}
-        linkColor={linkColor as any}
-        linkWidth={linkWidth as any}
-        linkDirectionalArrowLength={(l: any) =>
-          l.type !== "SIMILAR_TO" ? 3 : 0
-        }
-        linkDirectionalArrowRelPos={1}
-        onNodeClick={handleNodeClick}
-        d3AlphaDecay={0.02}
-        d3VelocityDecay={0.3}
-        cooldownTicks={200}
-      />
+      <div
+        ref={canvasRef}
+        style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
+      >
+        <ForceGraph2D
+          graphData={filteredData as any}
+          width={dimensions.width}
+          height={dimensions.height}
+          backgroundColor="#0a0a0f"
+          nodeId="id"
+          nodeLabel={(n: any) => `[${n.label}] ${n.name || n.id}`}
+          nodeCanvasObject={paintNode as any}
+          nodePointerAreaPaint={(node: any, color, ctx) => {
+            const r = (NODE_SIZES[node.label] ?? 5) * 2;
+            ctx.beginPath();
+            ctx.arc(node.x ?? 0, node.y ?? 0, r, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.fill();
+          }}
+          linkColor={linkColor as any}
+          linkWidth={linkWidth as any}
+          linkDirectionalArrowLength={(l: any) =>
+            l.type !== "SIMILAR_TO" ? 3 : 0
+          }
+          linkDirectionalArrowRelPos={1}
+          onNodeClick={handleNodeClick}
+          d3AlphaDecay={0.02}
+          d3VelocityDecay={0.3}
+          cooldownTicks={200}
+        />
+      </div>
 
       {/* Node detail panel */}
       {selectedNode && (

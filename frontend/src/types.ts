@@ -28,6 +28,12 @@ export interface GraphData {
   links: GraphLink[];
 }
 
+export interface GraphMeta {
+  graph_id: string;
+  name: string;
+  node_count: number;
+}
+
 export type MessageRole = "user" | "agent";
 
 export interface Message {
@@ -41,5 +47,12 @@ export type SSEEvent =
   | { type: "thinking"; content: string }
   | { type: "token"; content: string }
   | { type: "accessed_nodes"; node_ids: string[] }
+  | { type: "progress"; message: string; percent: number }
+  | {
+      type: "graph_created";
+      graph_id: string;
+      name: string;
+      node_count: number;
+    }
   | { type: "error"; content: string }
   | { type: "done" };

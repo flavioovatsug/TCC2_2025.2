@@ -9,6 +9,7 @@ Executar a partir da raiz do projeto Agent_Rag/:
 import os
 import sys
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -20,25 +21,12 @@ from src.infra.neo4j.client import Neo4jClient  # noqa: E402
 from src.infra.dspy.agent import build_agent  # noqa: E402
 from src.service.graph_service import GraphService  # noqa: E402
 from src.service.chat_service import ChatService  # noqa: E402
-from src.api.routes import chat as chat_routes, graph as graph_routes  # noqa: E402
+from src.api.routes import chat as chat_routes, graph as graph_routes, ws as ws_routes  # noqa: E402
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="RE Expert Agent")
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://localhost:3000"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
-    app.include_router(graph_routes.router)
-    app.include_router(chat_routes.router)
-
-    @app.on_event("startup")
-    async def startup():
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
         print("=" * 60)
         print("  RE Expert Agent — Startup")
         print("=" * 60)
@@ -58,7 +46,11 @@ def create_app() -> FastAPI:
         graph_service = GraphService(client)
         graph_routes.init(graph_service)
 
-        # 3. Popular grafo se vazio
+        # 3. Migração: tagging de nós sem graph_id + meta do grafo default
+        client.set_missing_graph_ids("default")
+        client.create_graph_meta("default", "Grafo Principal")
+
+        # 4. Popular grafo se vazio
         n = client.node_count()
         if n == 0:
             if not os.path.exists(config.CSV_PATH):
@@ -70,14 +62,46 @@ def create_app() -> FastAPI:
 
         print(f"[ok] Grafo: {n} nos")
 
-        # 4. Agente DSPy
+        # 4b. Grafo de teste automático (se SEED_TEST_GRAPH_NAME estiver definido)
+        if config.SEED_TEST_GRAPH_NAME:
+            existing = client.list_graphs()
+            already_exists = any(g["name"] == config.SEED_TEST_GRAPH_NAME for g in existing)
+            if not already_exists:
+                import time as _t
+                test_gid = f"test_{int(_t.time())}"
+                print(f"[!] Criando grafo de teste '{config.SEED_TEST_GRAPH_NAME}' ({config.SEED_TEST_GRAPH_COUNT} nos)...")
+                graph_service.populate_graph_from_dataset(
+                    test_gid, config.SEED_TEST_GRAPH_NAME, count=config.SEED_TEST_GRAPH_COUNT
+                )
+                print(f"[ok] Grafo de teste criado: graph_id={test_gid}")
+            else:
+                print(f"[ok] Grafo de teste '{config.SEED_TEST_GRAPH_NAME}' ja existe.")
+
+        # 5. Agente DSPy
         agent = build_agent(client)
         chat_service = ChatService(agent)
         chat_routes.init(chat_service)
+        ws_routes.init(chat_service)
 
         print("[ok] Servidor pronto em http://localhost:8000")
         print("[ok] Frontend esperado em http://localhost:5173")
         print("=" * 60)
+
+        yield  # aplicação rodando
+
+    app = FastAPI(title="RE Expert Agent", lifespan=lifespan)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://localhost:3000"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    app.include_router(graph_routes.router)
+    app.include_router(chat_routes.router)
+    app.include_router(ws_routes.router)
 
     return app
 
