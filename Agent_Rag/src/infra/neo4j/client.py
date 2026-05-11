@@ -34,11 +34,11 @@ class Neo4jClient(BaseGraphClient):
 
     # ---- Leitura ----
 
-    def search_requirements(self, query: str, limit: int = 10) -> List[Dict]:
+    def search_requirements(self, query: str, limit: int = 10, graph_id: str = "") -> List[Dict]:
         keywords = [kw.strip() for kw in query.lower().split() if len(kw.strip()) > 2]
         if not keywords:
             keywords = [query.lower()]
-        return self.run(queries.SEARCH_REQUIREMENTS, {"keywords": keywords, "limit": limit})
+        return self.run(queries.SEARCH_REQUIREMENTS, {"keywords": keywords, "limit": limit, "graph_id": graph_id})
 
     def get_requirement_context(self, req_id: str) -> Optional[Dict]:
         rows = self.run(queries.GET_REQUIREMENT_CONTEXT, {"req_id": req_id})
@@ -87,6 +87,7 @@ class Neo4jClient(BaseGraphClient):
             "domain": kw.get("domain", ""),
             "embedding": kw.get("embedding", []),
             "embedding_model": kw.get("embedding_model", "text-embedding-3-small"),
+            "graph_id": kw.get("graph_id", "default"),
         })
 
     def create_technique(self, **kw):
@@ -106,3 +107,22 @@ class Neo4jClient(BaseGraphClient):
             self.run(queries.CREATE_VECTOR_INDEX)
         except Exception:
             pass
+
+    # ---- Multi-graph ----
+
+    def list_graphs(self) -> List[Dict]:
+        return self.run(queries.LIST_GRAPHS)
+
+    def set_missing_graph_ids(self, default_id: str = "default"):
+        """Migração: etiqueta todos os nós sem graph_id com o id padrão."""
+        self.run(queries.SET_MISSING_GRAPH_IDS, {"graph_id": default_id})
+
+    def create_graph_meta(self, graph_id: str, name: str):
+        self.run(queries.CREATE_GRAPH_META, {"graph_id": graph_id, "name": name})
+
+    def sample_requirements_for_graph(self, keywords: list, limit: int) -> List[Dict]:
+        """Retorna amostra aleatória de requisitos do grafo default para seeding."""
+        return self.run(
+            queries.SAMPLE_REQUIREMENTS_FOR_GRAPH,
+            {"keywords": keywords, "limit": limit},
+        )

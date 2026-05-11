@@ -102,12 +102,14 @@ class GraphService:
         self._client.ensure_vector_index()
         print("[graph_service] Grafo pronto.")
 
-    def get_graph_for_visualization(self, limit: int = 200) -> Dict:
+    def get_graph_for_visualization(self, limit: int = 200, graph_id: str = "") -> Dict:
         """Retorna nós e arestas para visualização no front."""
         nodes = []
         links = []
 
-        reqs = self._client.run(queries.GET_GRAPH_NODES_REQUIREMENTS, {"limit": limit})
+        # 1. Requirement nodes filtrados pelo grafo
+        reqs = self._client.run(queries.GET_GRAPH_NODES_REQUIREMENTS, {"limit": limit, "graph_id": graph_id})
+        req_ids: set[str] = set()
         for r in reqs:
             text = r.get("text") or ""
             nodes.append({
@@ -116,26 +118,111 @@ class GraphService:
                 "text": text, "summary": r.get("summary") or "",
                 "communityId": r.get("communityId"),
             })
+            req_ids.add(r["id"])
 
-        for t in self._client.get_all_techniques():
-            nodes.append({"id": t["id"], "label": "Technique", "name": t["name"],
-                           "text": t.get("description") or "", "category": t.get("category") or ""})
-        for i in self._client.get_all_instructions():
-            text = i.get("text") or ""
-            nodes.append({"id": i["id"], "label": "Instruction",
-                           "name": text[:50] + ("..." if len(text) > 50 else ""), "text": text})
-        for c in self._client.get_all_concepts():
-            nodes.append({"id": c["id"], "label": "Concept", "name": c["name"],
-                           "text": c.get("definition") or ""})
+        # 2. Arestas que partem de Requirements deste grafo
+        raw_rels = self._client.run(queries.GET_GRAPH_RELATIONSHIPS, {"graph_id": graph_id})
+        # IDs de nós auxiliares (Technique/Concept/Instruction) referenciados
+        aux_ids_needed: set[str] = set()
+        for r in raw_rels:
+            src, tgt = r["source"], r["target"]
+            if src and tgt:
+                links.append({"source": src, "target": tgt, "type": r["type"]})
+                if src not in req_ids:
+                    aux_ids_needed.add(src)
+                if tgt not in req_ids:
+                    aux_ids_needed.add(tgt)
 
-        all_ids = {n["id"] for n in nodes}
+        # 3. SIMILAR_TO filtrado
+        for r in self._client.run(queries.GET_SIMILAR_TO_SAMPLE, {"graph_id": graph_id}):
+            src, tgt = r["source"], r["target"]
+            if src in req_ids and tgt in req_ids:
+                links.append({"source": src, "target": tgt, "type": "SIMILAR_TO"})
 
-        for r in self._client.run(queries.GET_GRAPH_RELATIONSHIPS):
-            if r["source"] in all_ids and r["target"] in all_ids:
-                links.append({"source": r["source"], "target": r["target"], "type": r["type"]})
-
-        for r in self._client.run(queries.GET_SIMILAR_TO_SAMPLE):
-            if r["source"] in all_ids and r["target"] in all_ids:
-                links.append({"source": r["source"], "target": r["target"], "type": "SIMILAR_TO"})
+        # 4. Inclui apenas nós auxiliares que são alcançados pelas arestas deste grafo
+        if aux_ids_needed:
+            for t in self._client.get_all_techniques():
+                if t["id"] in aux_ids_needed:
+                    nodes.append({"id": t["id"], "label": "Technique", "name": t["name"],
+                                   "text": t.get("description") or "", "category": t.get("category") or ""})
+            for i in self._client.get_all_instructions():
+                if i["id"] in aux_ids_needed:
+                    text = i.get("text") or ""
+                    nodes.append({"id": i["id"], "label": "Instruction",
+                                   "name": text[:50] + ("..." if len(text) > 50 else ""), "text": text})
+            for c in self._client.get_all_concepts():
+                if c["id"] in aux_ids_needed:
+                    nodes.append({"id": c["id"], "label": "Concept", "name": c["name"],
+                                   "text": c.get("definition") or ""})
 
         return {"nodes": nodes, "links": links}
+
+    def list_graphs(self) -> list:
+        return self._client.list_graphs()
+
+    def create_graph(self, name: str) -> dict:
+        import time as _time
+        safe = name.lower().replace(" ", "_")[:20]
+        graph_id = f"{safe}_{int(_time.time())}"
+        self._client.create_graph_meta(graph_id, name)
+        return {"graph_id": graph_id, "name": name, "node_count": 0}
+
+    def populate_graph_from_dataset(
+        self, graph_id: str, name: str, count: int = 100, keywords: List[str] = None
+    ) -> int:
+        """Cria um grafo completo copiando `count` requisitos do dataset default.
+        Útil para testes e demos. Conecta também técnicas/conceitos/instruções.
+        """
+        self._client.create_graph_meta(graph_id, name)
+        samples = self._client.sample_requirements_for_graph(keywords or [], count)
+        if not samples:
+            samples = self._client.sample_requirements_for_graph([], count)
+
+        prefix = graph_id[:6].upper()
+        for i, r in enumerate(samples):
+            new_id = f"REQ_{prefix}_{i:04d}"
+            self._client.create_requirement(
+                req_id=new_id,
+                text=r["text"],
+                summary=r.get("summary", ""),
+                req_type=r.get("type", "funcional"),
+                domain=r.get("domain", "geral"),
+                source="dataset_seeded",
+                embedding=[],
+                graph_id=graph_id,
+            )
+            if (i + 1) % 20 == 0:
+                print(f"  [{name}] {i + 1}/{len(samples)} requisitos...")
+
+        # Relacionamentos
+        kw_map = {
+            "TECH_001": ["login", "autenticacao", "usuario", "stakeholder"],
+            "TECH_003": ["caso de uso", "cenario", "fluxo"],
+            "TECH_004": ["prototipo", "interface", "tela"],
+            "TECH_005": ["seguranca", "criptografia", "autorizar", "senha"],
+        }
+        reqs = self._client.run(
+            "MATCH (r:Requirement {graph_id: $gid}) RETURN r.req_id AS req_id, toLower(r.text) AS txt",
+            {"gid": graph_id},
+        )
+        for r in reqs:
+            rid, txt = r["req_id"], r["txt"]
+            for tech_id, keywords_t in kw_map.items():
+                if any(kw in txt for kw in keywords_t):
+                    self._client.run(
+                        "MATCH (r:Requirement {req_id:$rid}),(t:Technique {tech_id:$tid}) MERGE (r)-[:USES_TECHNIQUE]->(t)",
+                        {"rid": rid, "tid": tech_id},
+                    )
+            cid = "CONC_001" if ("deve" in txt or "permitir" in txt) else "CONC_002"
+            self._client.run(
+                "MATCH (r:Requirement {req_id:$rid}),(c:Concept {concept_id:$cid}) MERGE (r)-[:IS_A]->(c)",
+                {"rid": rid, "cid": cid},
+            )
+            for iid in ["INST_001", "INST_004"]:
+                self._client.run(
+                    "MATCH (r:Requirement {req_id:$rid}),(i:Instruction {instr_id:$iid}) MERGE (r)-[:SUPPORTED_BY]->(i)",
+                    {"rid": rid, "iid": iid},
+                )
+
+        print(f"  [{name}] Grafo de teste criado: {len(samples)} requisitos.")
+        return len(samples)

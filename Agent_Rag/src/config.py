@@ -28,3 +28,8 @@ DATA_RAW_PATH = os.path.join(PROJECT_ROOT, "data", "raw")
 DATA_PROCESSED_PATH = os.path.join(PROJECT_ROOT, "data", "processed")
 CSV_PATH = os.path.join(DATA_PROCESSED_PATH, "user_stories_embeddings.csv")
 COMPILED_AGENT_PATH = os.path.join(PROJECT_ROOT, "compiled_agent.json")
+
+# --- Grafo de teste automático ---
+# Se definido, cria um grafo com esse nome no startup (se ainda não existir)
+SEED_TEST_GRAPH_NAME = os.getenv("SEED_TEST_GRAPH_NAME", "")
+SEED_TEST_GRAPH_COUNT = int(os.getenv("SEED_TEST_GRAPH_COUNT", "80"))

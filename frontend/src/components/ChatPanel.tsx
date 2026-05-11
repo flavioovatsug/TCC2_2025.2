@@ -6,21 +6,43 @@ import "./ChatPanel.css";
 
 interface Props {
   onAccessedNodes: (nodeIds: string[]) => void;
+  graphId: string;
+  initialMessages?: Message[];
+  onMessagesChange?: (graphId: string, messages: Message[]) => void;
+  onMessageComplete?: () => void;
+  onGraphCreated?: (graphId: string, name: string) => void;
 }
 
-export default function ChatPanel({ onAccessedNodes }: Props) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome",
-      role: "agent",
-      content:
-        "Olá! Sou um especialista em **Engenharia de Requisitos** com acesso ao grafo de conhecimento.\n\nPosso ajudar com:\n- Buscar requisitos específicos\n- Explicar técnicas de elicitação\n- Analisar padrões nos requisitos\n- Explicar conceitos de ER\n\nO que deseja saber?",
-    },
-  ]);
+export default function ChatPanel({
+  onAccessedNodes,
+  graphId,
+  initialMessages,
+  onMessagesChange,
+  onMessageComplete,
+  onGraphCreated,
+}: Props) {
+  const WELCOME: Message = {
+    id: "welcome",
+    role: "agent",
+    content:
+      "Olá! Sou um especialista em **Engenharia de Requisitos** com acesso ao grafo de conhecimento.\n\nPosso ajudar com:\n- Buscar requisitos específicos\n- Explicar técnicas de elicitação\n- Analisar padrões nos requisitos\n- Explicar conceitos de ER\n\nO que deseja saber?",
+  };
+  const [messages, setMessages] = useState<Message[]>(
+    initialMessages && initialMessages.length > 0 ? initialMessages : [WELCOME],
+  );
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [progress, setProgress] = useState<{
+    message: string;
+    percent: number;
+  } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Persiste mensagens no store do pai sempre que atualizam
+  useEffect(() => {
+    onMessagesChange?.(graphId, messages);
+  }, [messages, graphId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -52,10 +74,22 @@ export default function ChatPanel({ onAccessedNodes }: Props) {
     setIsStreaming(true);
 
     try {
-      for await (const event of streamChat(question)) {
+      for await (const event of streamChat(question, graphId)) {
+        console.log(`[chat] event:${event.type}`, event);
         if (event.type === "thinking") {
           // já mostrado pelo indicador dentro da bolha
+        } else if (event.type === "progress") {
+          console.log(`[chat] progress: ${event.percent}% — ${event.message}`);
+          setProgress({ message: event.message, percent: event.percent });
+        } else if (event.type === "graph_created") {
+          console.log(
+            `[chat] graph_created: id=${event.graph_id} name=${event.name} nodes=${event.node_count}`,
+          );
+          setProgress(null);
+          // Navega para o novo grafo após breve delay para mostrar a resposta
+          setTimeout(() => onGraphCreated?.(event.graph_id, event.name), 1200);
         } else if (event.type === "accessed_nodes") {
+          console.log(`[chat] accessed_nodes: ${event.node_ids?.length} nodes`);
           onAccessedNodes(event.node_ids);
         } else if (event.type === "token") {
           setMessages((prev) =>
@@ -101,13 +135,22 @@ export default function ChatPanel({ onAccessedNodes }: Props) {
       }
     } finally {
       setIsStreaming(false);
+      setProgress(null);
       setMessages((prev) =>
         prev.map((m) =>
           m.id === agentMsgId ? { ...m, isStreaming: false } : m,
         ),
       );
+      onMessageComplete?.();
     }
-  }, [input, isStreaming, onAccessedNodes]);
+  }, [
+    input,
+    isStreaming,
+    onAccessedNodes,
+    graphId,
+    onMessageComplete,
+    onGraphCreated,
+  ]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -118,6 +161,24 @@ export default function ChatPanel({ onAccessedNodes }: Props) {
 
   return (
     <div className="chat-panel">
+      {/* Toast de progresso — criação de grafo */}
+      {progress && (
+        <div className="progress-toast">
+          <div className="progress-toast-header">
+            <span className="progress-toast-icon">◈</span>
+            <span className="progress-toast-label">Criando grafo...</span>
+            <span className="progress-toast-pct">{progress.percent}%</span>
+          </div>
+          <div className="progress-bar-track">
+            <div
+              className="progress-bar-fill"
+              style={{ width: `${progress.percent}%` }}
+            />
+          </div>
+          <p className="progress-toast-msg">{progress.message}</p>
+        </div>
+      )}
+
       <div className="chat-messages">
         {messages.map((msg) => (
           <div key={msg.id} className={`message message-${msg.role}`}>

@@ -9,9 +9,9 @@ class ChatService:
     def __init__(self, agent: BaseAgent):
         self._agent = agent
 
-    def answer(self, question: str) -> tuple[str, list[str]]:
+    def answer(self, question: str, graph_id: str = "default") -> tuple[str, list[str]]:
         """
         Executa o agente e retorna (resposta, ids_de_nos_acessados).
-        Delega retry/rate-limit ao agente.
+        O graph_id determina qual grafo de conhecimento usar.
         """
-        return self._agent.ask(question)
+        return self._agent.ask(question, graph_id=graph_id)
