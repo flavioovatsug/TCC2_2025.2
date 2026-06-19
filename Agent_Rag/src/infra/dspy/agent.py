@@ -28,8 +28,34 @@ def _track(ids: list):
         lst.extend(ids)
 
 
+def _ensure_static_nodes(client: BaseGraphClient):
+    """Garante que os nós estáticos (Technique, Concept, Instruction) existam."""
+    from src.service.graph_service import _TECHNIQUES, _INSTRUCTIONS, _CONCEPTS
+    for t in _TECHNIQUES:
+        client.run(
+            "MERGE (t:Technique {tech_id: $tech_id}) "
+            "SET t.name = $name, t.description = $description, "
+            "t.category = $category, t.source = $source",
+            t,
+        )
+    for c in _CONCEPTS:
+        client.run(
+            "MERGE (c:Concept {concept_id: $concept_id}) "
+            "SET c.name = $name, c.definition = $definition, c.source = $source",
+            c,
+        )
+    for i in _INSTRUCTIONS:
+        client.run(
+            "MERGE (i:Instruction {instr_id: $instr_id}) "
+            "SET i.text = $text, i.context = $context, i.source = $source",
+            i,
+        )
+
+
 def _connect_graph_nodes(client: BaseGraphClient, graph_id: str):
     """Conecta os nós de um grafo recém-criado às Techniques/Concepts/Instructions padrão."""
+    _ensure_static_nodes(client)
+
     kw_map = {
         "TECH_001": ["login", "autenticacao", "usuario", "stakeholder", "entrevistar"],
         "TECH_003": ["caso de uso", "cenario", "fluxo"],
@@ -80,7 +106,7 @@ def _connect_graph_nodes(client: BaseGraphClient, graph_id: str):
 
 # Detecta pedidos de criação de grafo antes de entrar no ReAct
 _CREATION_RE = re.compile(
-    r"\b(cri[ae]|gen[ae]r|mont[ae]|constru[ia]|build|creat[e])\b.{0,120}\b(grafo|graph|projeto|project|base\s+de\s+requisitos?)\b",
+    r"\b(cri[ae]|gen[ae]r|mont[ae]|constru[ia]|build|creat[e])\b.{0,120}\b(grafos?|graphs?|projetos?|projects?|n[oó]s?|nodes?|requisitos?|base\s+de\s+requisitos?)\b",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -216,6 +242,7 @@ def _make_tools(client: BaseGraphClient):
             graph_id=gid,
         )
         _track([req_id])
+        _ensure_static_nodes(client)
 
         # Conecta a técnicas relevantes por keywords
         text_lower = text.lower()
