@@ -1,7 +1,3 @@
-"""
-DSPy Signatures e instruções de prompt.
-"""
-
 import dspy
 
 AGENT_INSTRUCTIONS = (
@@ -20,7 +16,7 @@ AGENT_INSTRUCTIONS = (
     "'crie um grafo chamado X com Y nos', 'quero um grafo sobre Z'. "
     "Passe o nome do projeto em 'name', a quantidade em 'node_count' e palavras-chave em 'description'."
 )
-
+3
 RequirementsQA = dspy.Signature("question -> answer").with_instructions(AGENT_INSTRUCTIONS)
 
 

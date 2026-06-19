@@ -106,7 +106,7 @@ def _connect_graph_nodes(client: BaseGraphClient, graph_id: str):
 
 # Detecta pedidos de criação de grafo antes de entrar no ReAct
 _CREATION_RE = re.compile(
-    r"\b(cri[ae]|gen[ae]r|mont[ae]|constru[ia]|build|creat[e])\b.{0,120}\b(grafos?|graphs?|projetos?|projects?|base\s+de\s+requisitos?)\b",
+    r"\b(cri[ae]|gen[ae]r|mont[ae]|constru[ia]|build|creat[e])\b.{0,120}\b(grafos?|graphs?|projetos?|projects?|n[oó]s?|nodes?|requisitos?|base\s+de\s+requisitos?)\b",
     re.IGNORECASE | re.DOTALL,
 )
 
