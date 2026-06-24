@@ -189,3 +189,20 @@ LIMIT $limit
 RETURN r.req_id AS req_id, r.text AS text, r.summary AS summary,
        r.type AS type, r.domain AS domain
 """
+
+# Busca semântica via índice vetorial local (embedding_local, 384 dims)
+# Requer que os nós tenham a propriedade embedding_local populada.
+SEARCH_REQUIREMENTS_SEMANTIC = """
+CALL db.index.vector.queryNodes('requirement_embeddings_local', $limit, $embedding)
+YIELD node AS r, score
+WHERE ($graph_id = '' OR r.graph_id = $graph_id)
+RETURN r.req_id AS req_id, r.text AS text, r.summary AS summary,
+       r.type AS type, r.domain AS domain, r.communityId AS communityId,
+       score
+"""
+
+# Atualiza a propriedade embedding_local de um nó
+SET_LOCAL_EMBEDDING = """
+MATCH (r:Requirement {req_id: $req_id})
+SET r.embedding_local = $embedding, r.embedding_local_model = $model
+"""

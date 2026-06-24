@@ -69,6 +69,36 @@ class Neo4jClient(BaseGraphClient):
             {"req_id": req_id, "graph_id": graph_id, "limit": limit},
         )
 
+    def search_requirements_semantic(
+        self, query: str, limit: int = 15, graph_id: str = ""
+    ) -> List[Dict]:
+        """
+        Busca semântica via embedding local (sentence-transformers, 384 dims).
+        Usa o índice vetorial 'requirement_embeddings_local'.
+        Cai para busca léxica se o índice não existir ou a busca retornar vazio.
+        """
+        from src.infra.embeddings import embed_text
+        q_vec = embed_text(query)
+        try:
+            rows = self.run(
+                queries.SEARCH_REQUIREMENTS_SEMANTIC,
+                {"embedding": q_vec, "limit": limit, "graph_id": graph_id},
+            )
+            if rows:
+                return rows
+        except Exception:
+            pass
+        # Fallback léxico
+        return self.search_requirements(query, limit=limit, graph_id=graph_id)
+
+    def set_local_embedding(self, req_id: str, embedding: List) -> None:
+        """Salva o embedding local (384 dims) em um nó Requirement."""
+        from src.infra.embeddings import LOCAL_EMBEDDING_MODEL
+        self.run(
+            queries.SET_LOCAL_EMBEDDING,
+            {"req_id": req_id, "embedding": embedding, "model": LOCAL_EMBEDDING_MODEL},
+        )
+
     def get_community_requirements(self, req_id: str, limit: int = 15) -> List[Dict]:
         rows = self.run(queries.GET_COMMUNITY_REQUIREMENTS, {"req_id": req_id, "limit": limit})
         if not rows:

@@ -60,9 +60,6 @@ def _c(color: str, text: str) -> str:
 DEFAULT_QUESTIONS = [
     "Quais são as principais funcionalidades para gerenciamento de tarefas (criação, edição, exclusão)?",
     "Quais são as dependências funcionais e estruturais para que a edição de tarefas funcione corretamente?",
-    "Se houver uma alteração ou falha no sistema de categorias/tags, quais outros requisitos ou funcionalidades serão impactados?",
-    "Como a organização de tarefas se relaciona com a funcionalidade de busca ou filtragem?",
-    "Quais são os requisitos que estendem ou adicionam funcionalidades extras (como prioridades) ao sistema básico de tarefas?",
 ]
 
 

@@ -154,6 +154,28 @@ def _make_tools(client: BaseGraphClient):
                 lines.append(f"  Criterios: {r['summary'][:200]}")
         return "\n".join(lines)
 
+    def search_requirements_semantic(query: str) -> str:
+        """SEMANTIC search using vector embeddings — finds requirements by MEANING, not just keywords.
+        Use this FIRST before search_requirements when you need to find related concepts.
+        Works even when the exact words differ (e.g. 'tarefa' matches 'atividade', 'item', 'trabalho').
+        """
+        gid = current_graph_id.get("default")
+        try:
+            results = client.search_requirements_semantic(query, limit=20, graph_id=gid)
+        except Exception:
+            results = client.search_requirements(query, limit=20, graph_id=gid)
+        _track([r["req_id"] for r in results])
+        if not results:
+            return "Nenhum requisito encontrado na busca semântica. Tente search_requirements."
+        lines = [f"[Busca semântica — {len(results)} resultados]:"]
+        for r in results:
+            score = f" (similaridade: {r.get('score', 0):.3f})" if r.get('score') else ""
+            comm = f" [Comunidade {r['communityId']}]" if r.get("communityId") is not None else ""
+            lines.append(f"[{r['req_id']}]{comm}{score} {r['text']}")
+            if r.get("summary"):
+                lines.append(f"  Criterios: {r['summary'][:200]}")
+        return "\n".join(lines)
+
     def get_requirement_context(req_id: str) -> str:
         """Get full context for a requirement: metadata, connected techniques/concepts, and semantic GRAPH NEIGHBORS (related, depends-on, extends, conflicts)."""
         gid = current_graph_id.get("default")
@@ -468,6 +490,7 @@ def _make_tools(client: BaseGraphClient):
         )
 
     return [
+        search_requirements_semantic,
         search_requirements,
         get_requirement_context,
         get_community_context,
@@ -487,7 +510,7 @@ class GraphRAGAgent(dspy.Module):
         self.react = dspy.ReAct(
             RequirementsQA,
             tools=self._tools_list,
-            max_iters=8,
+            max_iters=4,  # Reduzido de 8 para 4 — mais rápido na avaliação
         )
 
     def forward(self, question: str) -> dspy.Prediction:
