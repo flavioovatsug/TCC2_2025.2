@@ -36,11 +36,11 @@ def get_scenario_names(scenarios):
     names = []
     for s in scenarios:
         if s == 'A':
-            names.append('Cenário A\n(Baseline)')
+            names.append('Cenário A\n(Modelo Cru)')
         elif s == 'B':
-            names.append('Cenário B\n(Prompt Cru)')
+            names.append('Cenário B\n(Prompt Básico)')
         elif s == 'C':
-            names.append('Cenário C\n(Otimizado)')
+            names.append('Cenário C\n(DSPy Otimizado)')
         else:
             names.append(s)
     return names

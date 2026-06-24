@@ -140,23 +140,25 @@ def _make_tools(client: BaseGraphClient):
     """Cria closures de tool functions para o agente DSPy."""
 
     def search_requirements(query: str) -> str:
-        """Search the knowledge graph for software requirements matching keywords."""
+        """Search the knowledge graph for software requirements matching keywords. Returns top matches with community info."""
         gid = current_graph_id.get("default")
-        results = client.search_requirements(query, limit=8, graph_id=gid)
+        results = client.search_requirements(query, limit=20, graph_id=gid)
         _track([r["req_id"] for r in results])
         if not results:
             return "Nenhum requisito encontrado para essa busca."
         lines = []
         for r in results:
-            lines.append(f"[{r['req_id']}] {r['text']}")
+            comm = f" [Comunidade {r['communityId']}]" if r.get("communityId") is not None else ""
+            lines.append(f"[{r['req_id']}]{comm} {r['text']}")
             if r.get("summary"):
                 lines.append(f"  Criterios: {r['summary'][:200]}")
         return "\n".join(lines)
 
     def get_requirement_context(req_id: str) -> str:
-        """Get full context for a specific requirement by its ID (e.g. 'REQ_0001')."""
+        """Get full context for a requirement: metadata, connected techniques/concepts, and semantic GRAPH NEIGHBORS (related, depends-on, extends, conflicts)."""
+        gid = current_graph_id.get("default")
         _track([req_id])
-        ctx = client.get_requirement_context(req_id)
+        ctx = client.get_requirement_context(req_id, graph_id=gid)
         if not ctx:
             return f"Requisito '{req_id}' nao encontrado."
         parts = [f"Requisito [{ctx['req_id']}]: {ctx['text']}"]
@@ -164,12 +166,23 @@ def _make_tools(client: BaseGraphClient):
             parts.append(f"Criterios: {ctx['summary']}")
         if ctx.get("type"):
             parts.append(f"Tipo: {ctx['type']}")
+        if ctx.get("communityId") is not None:
+            parts.append(f"Comunidade Louvain: {ctx['communityId']}")
         if ctx.get("techniques"):
             parts.append(f"Tecnicas: {', '.join(ctx['techniques'])}")
         if ctx.get("concepts"):
             parts.append(f"Conceitos: {', '.join(ctx['concepts'])}")
         if ctx.get("instructions"):
             parts.append(f"Boas praticas: {'; '.join(ctx['instructions'])}")
+        # Vizinhos semanticos — o coração do GraphRAG
+        neighbors = ctx.get("neighbors") or []
+        if neighbors:
+            parts.append(f"Vizinhos semanticos ({len(neighbors)} nos conectados):")
+            for nb in neighbors[:8]:  # mostra até 8 vizinhos
+                if nb and nb.get("req_id"):
+                    rel = nb.get("rel_type", "RELATED_TO")
+                    parts.append(f"  --[{rel}]--> [{nb['req_id']}] {nb.get('text','')[:120]}")
+            _track([nb["req_id"] for nb in neighbors if nb and nb.get("req_id")])
         return "\n".join(parts)
 
     def get_community_context(req_id: str) -> str:
@@ -534,13 +547,14 @@ class GraphRAGAgent(dspy.Module):
         raise RuntimeError("Maximo de tentativas atingido")
 
 
-def build_agent(client: BaseGraphClient) -> GraphRAGAgent:
+def build_agent(client: BaseGraphClient, cache: bool = True) -> GraphRAGAgent:
     """Configura DSPy, cria e retorna o agente. Carrega prompt otimizado se disponível."""
     lm = dspy.LM(
         model=config.DSPY_MODEL,
         api_key=config.OPENROUTER_API_KEY,
         temperature=config.LLM_TEMPERATURE,
         max_tokens=config.LLM_MAX_TOKENS,
+        cache=cache,
     )
     dspy.configure(lm=lm)
 

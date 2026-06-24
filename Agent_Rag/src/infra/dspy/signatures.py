@@ -115,3 +115,25 @@ InferRelationshipsOptimized = dspy.Signature(
     "requirements_list, domain -> relationships_json",
 ).with_instructions(_REL_INSTRUCTIONS_OPTIMIZED)
 
+
+# ---------------------------------------------------------------------------
+# Signatures ZERO-SHOT para o Cenário A (modelo completamente cru)
+# Sem DSPy, sem JSON, sem tipos, sem exemplos — o modelo decide tudo.
+# ---------------------------------------------------------------------------
+
+_GEN_INSTRUCTIONS_RAW = """\
+Escreva uma lista de requisitos de software sobre o tema indicado.
+"""
+
+GenerateGraphChunkRaw = dspy.Signature(
+    "topic -> requirements_text",
+).with_instructions(_GEN_INSTRUCTIONS_RAW)
+
+
+_REL_INSTRUCTIONS_RAW = """\
+Identifique relações entre os itens da lista abaixo.
+"""
+
+InferRelationshipsRaw = dspy.Signature(
+    "items_list -> relations_text",
+).with_instructions(_REL_INSTRUCTIONS_RAW)

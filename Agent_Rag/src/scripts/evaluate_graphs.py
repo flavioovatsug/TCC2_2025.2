@@ -4,19 +4,22 @@ Avaliação comparativa de criação de grafos — TCC.
 
 Questão central: "Engenharia de prompt faz diferença na geração de grafos RAG?"
 
-Cenário A: Script / Regras — Copia do dataset e usa apenas regras fixas de palavras-chave.
-Cenário B: Prompt CRU — "Gere N requisitos sobre X." (zero instrucao)
-Cenário C: Prompt OTIMIZADO — especialista RE, JSON estruturado, exemplos reais,
-            tipos de relacionamento, critérios e justificativas
+Gabarito: Gold Standard construído a partir do CSV (cosine + Louvain).
+          Construído separadamente via: python -m src.scripts.build_gabarito
 
-O dataset de referência é um app genérico de produtividade (tarefas, eventos,
-calendário, anotações) — condizente com dataset_user_traduzido_partial.csv.
+Cenário A: Modelo CRU — zero-shot, sem JSON, sem tipos, sem exemplos.
+           O modelo decide o formato, a estrutura e as conexões.
+Cenário B: Prompt BÁSICO — JSON estruturado mas apenas "RELATED_TO" como
+           tipo de relacionamento. Sem few-shot, sem DSPy.
+Cenário C: Prompt OTIMIZADO — especialista RE, JSON estruturado, exemplos reais,
+           tipos de relacionamento (DEPENDS_ON, EXTENDS...), critérios e
+           justificativas. Otimizado com DSPy.
 
 Uso (a partir de Agent_Rag/):
-    python3 -m src.scripts.evaluate_graphs --topic "gerenciamento de tarefas" --count 10 --runs 1
-    python3 -m src.scripts.evaluate_graphs --count 20 --runs 3 --save-json results/tarefas.json
-    python3 -m src.scripts.evaluate_graphs --no-cleanup  # mantém grafos no Neo4j
-    python3 -m src.scripts.evaluate_graphs --scenario C  # só cenário C
+    python3 -m src.scripts.evaluate_graphs --topic "tarefas" --count 20 --runs 1
+    python3 -m src.scripts.evaluate_graphs --scenario A  # só cenário A (cru)
+    python3 -m src.scripts.evaluate_graphs --scenario ABC --no-cleanup
+    python3 -m src.scripts.evaluate_graphs --save-json results/tarefas.json
 """
 
 import sys
@@ -176,6 +179,98 @@ def _parse_json(raw: str) -> Any:
 
 # ─── Geração de requisitos ────────────────────────────────────────────────────
 
+def _parse_raw_text_to_reqs(raw_text: str, limit: int) -> List[Dict]:
+    """
+    Converte texto livre (saída do cenário A cru) em lista de dicts de requisitos.
+    Tenta extrair linhas numeradas ou com marcadores primeiro.
+    """
+    lines = []
+    for ln in raw_text.split("\n"):
+        ln = ln.strip()
+        # Remove marcadores de lista e numeração
+        ln = re.sub(r"^(\d+\.?|[-•*]|\*\*)\s*", "", ln)
+        if len(ln) > 12:
+            lines.append(ln[:250])
+    if not lines:
+        # fallback: pega o texto inteiro como um req
+        lines = [raw_text[:250]]
+    return [
+        {"text": ln, "summary": "", "type": "funcional", "domain": "geral"}
+        for ln in lines[:limit]
+    ]
+
+
+def _parse_raw_rels_to_list(
+    raw_text: str,
+    req_ids: List[str],
+) -> List[Dict]:
+    """
+    Tenta extrair pares de IDs de um texto livre gerado no cenário A.
+    Busca padrões como 'REQ_X ... REQ_Y' ou 'ID_A → ID_B'.
+    """
+    pairs: List[Dict] = []
+    id_pattern = re.compile(r"(REQ_[A-Z0-9_]+)", re.IGNORECASE)
+    ids_found = id_pattern.findall(raw_text)
+    seen: set = set()
+    for i in range(0, len(ids_found) - 1, 2):
+        a, b = ids_found[i].upper(), ids_found[i + 1].upper()
+        if a != b and (a, b) not in seen:
+            pairs.append({"from": a, "to": b, "type": "RELATED_TO", "reason": "inferido (modelo cru)"})
+            seen.add((a, b))
+    return pairs
+
+
+def _generate_reqs_a_raw(
+    lm: dspy.LM,
+    topic: str,
+    count: int,
+) -> Tuple[List[Dict], List[str], List[str]]:
+    """
+    Cenário A — MODELO CRUDÍSSIMO: zero-shot, sem JSON, sem tipos, sem exemplos.
+    O LLM decide o formato, a língua, a estrutura — sem guia algum.
+    Retorna (reqs, samples, reasonings).
+    """
+    from src.infra.dspy.signatures import GenerateGraphChunkRaw
+    gen = dspy.ChainOfThought(GenerateGraphChunkRaw)
+    h_before = len(getattr(lm, "history", []))
+    try:
+        res = gen(topic=f"{topic} (gere {count} requisitos)")
+        cot = _extract_cot(res) or _extract_history_reasoning(lm, h_before)
+        raw_output = getattr(res, "requirements_text", "") or ""
+        reqs = _parse_raw_text_to_reqs(raw_output, count)
+    except Exception as e:
+        print(f"  {_c(YELLOW, f'[A-gen] falhou: {e}')}")
+        reqs = [{"text": f"Requisito {i+1} sobre {topic}.", "summary": "",
+                 "type": "funcional", "domain": "geral"} for i in range(count)]
+        cot = ""
+    samples = [reqs[0].get("text", "")[:150]] if reqs else []
+    return reqs, samples, ([cot] if cot else [])
+
+
+def _infer_relationships_a_raw(
+    lm: dspy.LM,
+    reqs_with_ids: List[Tuple[str, Dict]],
+) -> Tuple[List[Dict], str]:
+    """
+    Cenário A — inferência de relacionamentos CRUA.
+    Sem tipos, sem JSON — texto livre. O resultado será parseado de forma best-effort.
+    """
+    from src.infra.dspy.signatures import InferRelationshipsRaw
+    items_str = "\n".join(f"[{rid}] {r.get('text', '')[:100]}" for rid, r in reqs_with_ids)
+    infer = dspy.ChainOfThought(InferRelationshipsRaw)
+    h_before = len(getattr(lm, "history", []))
+    try:
+        res = infer(items_list=items_str)
+        cot = _extract_cot(res) or _extract_history_reasoning(lm, h_before)
+        raw_text = getattr(res, "relations_text", "") or ""
+        req_ids = [rid for rid, _ in reqs_with_ids]
+        rels = _parse_raw_rels_to_list(raw_text, req_ids)
+    except Exception as e:
+        print(f"  {_c(YELLOW, f'[A-rel] inferência falhou: {e}')}")
+        rels, cot = [], ""
+    return rels, cot
+
+
 def _generate_reqs_b(
     lm: dspy.LM,
     topic: str,
@@ -183,8 +278,7 @@ def _generate_reqs_b(
     chunk_size: int = 5,
 ) -> Tuple[List[Dict], List[str], List[str]]:
     """
-    Cenário B — prompt CRUDISSIMO: só "Gere N requisitos sobre X."
-    O LLM decide o formato, a lingua, a estrutura — sem guia algum.
+    Cenário B — prompt BÁSICO com JSON mas apenas RELATED_TO.
     Retorna (reqs, samples, reasonings).
     """
     from src.infra.dspy.signatures import GenerateGraphChunkBasic
@@ -207,8 +301,6 @@ def _generate_reqs_b(
                 if not isinstance(reqs, list):
                     raise ValueError("não é lista")
             except Exception:
-                # Se o LLM retornou texto livre (esperado com prompt cru),
-                # converte cada linha/parágrafo em um requisito simples
                 lines = [ln.strip() for ln in raw_output.split("\n") if ln.strip() and len(ln.strip()) > 10]
                 reqs = [{"text": ln[:200], "summary": "", "type": "funcional", "domain": "geral"}
                         for ln in lines[:batch]]
@@ -271,52 +363,7 @@ def _generate_reqs_c(
     return all_reqs, samples, reasonings
 
 
-def _generate_reqs_a(
-    client: Neo4jClient,
-    topic: str,
-    count: int,
-) -> Tuple[List[Dict], List[str], List[str]]:
-    """
-    Cenário A — Script / Regras fixas.
-    Não usa o LLM. Copia os requisitos diretamente do dataset usando o Neo4jClient.
-    Retorna (reqs, samples, reasonings).
-    """
-    # Em vez de usar sample_requirements_for_graph que pode estar preso ao graph_id 'default',
-    # vamos pegar diretamente do Neo4j todos os requisitos que vieram do dataset (não llm_generated)
-    # limitando ao tema se possível.
-    q = """
-    MATCH (r:Requirement)
-    WHERE coalesce(r.source, '') <> 'llm_generated'
-      AND ($kws = [] OR any(kw IN $kws WHERE toLower(r.text) CONTAINS kw OR toLower(coalesce(r.domain,'')) CONTAINS kw))
-    WITH r ORDER BY rand() LIMIT $limit
-    RETURN r.req_id AS req_id, r.text AS text, r.summary AS summary,
-           r.type AS type, r.domain AS domain
-    """
-    kws = _domain_kws(topic)
-    examples = client.run(q, {"kws": [k for k in kws if len(k) > 2][:5], "limit": count})
-    
-    if len(examples) < count:
-        q_fallback = """
-        MATCH (r:Requirement)
-        WHERE coalesce(r.source, '') <> 'llm_generated'
-        WITH r ORDER BY rand() LIMIT $limit
-        RETURN r.req_id AS req_id, r.text AS text, r.summary AS summary,
-               r.type AS type, r.domain AS domain
-        """
-        more = client.run(q_fallback, {"limit": count - len(examples)})
-        examples.extend(more)
-    
-    reqs = []
-    for r in examples[:count]:
-        reqs.append({
-            "text": r.get("text", ""),
-            "summary": r.get("summary", ""),
-            "type": r.get("type", "funcional"),
-            "domain": r.get("domain", "geral")
-        })
-    
-    samples = [reqs[0].get("text", "")[:150]] if reqs else []
-    return reqs, samples, []
+# (Cenário A cru foi movido para _generate_reqs_a_raw acima)
 
 
 # ─── Inferência de relacionamentos via LLM ────────────────────────────────────
@@ -508,7 +555,7 @@ def _run_scenario(
     # ── 1. Gera requisitos ────────────────────────────────────────────────────
     t0 = time.time()
     if scenario == "A":
-        reqs, samples, gen_cots = _generate_reqs_a(client, topic, count)
+        reqs, samples, gen_cots = _generate_reqs_a_raw(lm, topic, count)
     elif scenario == "B":
         reqs, samples, gen_cots = _generate_reqs_b(lm, topic, count)
     else:
@@ -531,13 +578,14 @@ def _run_scenario(
     # ── 4. Infere relacionamentos via LLM ─────────────────────────────────────
     t2 = time.time()
     if scenario == "A":
-        # Cenário A não usa LLM para relacionamentos
-        llm_rels, rel_cot = [], ""
+        # Cenário A cru — tenta inferir rels com texto livre
+        print(f"  {_c(CYAN, '  → inferindo relacionamentos (modelo cru)...')}")
+        llm_rels, rel_cot = _infer_relationships_a_raw(lm, reqs_with_ids)
     elif scenario == "B":
-        print(f"  {_c(CYAN, '  → inferindo relacionamentos com o LLM...')}")
+        print(f"  {_c(CYAN, '  → inferindo relacionamentos com o LLM (RELATED_TO)...')}")
         llm_rels, rel_cot = _infer_relationships_b(lm, reqs_with_ids)
     else:
-        print(f"  {_c(CYAN, '  → inferindo relacionamentos com o LLM...')}")
+        print(f"  {_c(CYAN, '  → inferindo relacionamentos com o LLM (tipos otimizados)...')}")
         llm_rels, rel_cot = _infer_relationships_c(lm, reqs_with_ids, topic)
     rel_time = round(time.time() - t2, 2)
 
@@ -595,6 +643,61 @@ def _stats(values: List[float]) -> Tuple[float, float]:
     return round(mean, 2), round(std, 2)
 
 
+_SCENARIO_LABELS = {
+    "A": "A — Modelo Cru (zero-shot, sem guia)",
+    "B": "B — Prompt Básico (JSON + RELATED_TO)",
+    "C": "C — DSPy Otimizado (tipos + exemplos + CoT)",
+}
+
+_HUMAN_EFFORT_TABLE = {
+    "A": {
+        "setup_horas": "~0",
+        "prompt_engineering": "Nenhum — prompt mínimo de 1 linha",
+        "iteracoes_prompt": 0,
+        "codigo_extra": "Apenas chamar o LLM com topic -> text",
+        "nivel": "Baixo",
+    },
+    "B": {
+        "setup_horas": "~1-2h",
+        "prompt_engineering": "Manual — instrução de JSON + definição de RELATED_TO",
+        "iteracoes_prompt": 3,
+        "codigo_extra": "Signature DSPy + parser JSON",
+        "nivel": "Médio",
+    },
+    "C": {
+        "setup_horas": "~8-16h",
+        "prompt_engineering": "Otimização via DSPy (compilação de few-shot, tipos semânticos, critérios)",
+        "iteracoes_prompt": 10,
+        "codigo_extra": "DSPy ReAct + Signatures + compiled_agent.json + infer_relationships_optimized",
+        "nivel": "Alto",
+    },
+}
+
+
+def _print_effort_table() -> None:
+    """Imprime a tabela de nível de esforço humano para cada cenário."""
+    print()
+    print(_c(BOLD + BLUE, "═══ Nível de Esforço Humano por Cenário ═══"))
+    print()
+    headers = ["Cenário", "Nível", "Setup (h)", "Iter. Prompt", "Prompt Engineering"]
+    col_w   = [38, 9, 11, 14, 55]
+    print(_c(BOLD, "  ".join(h.ljust(w) for h, w in zip(headers, col_w))))
+    print(_c(DIM,  "─" * 135))
+    colors = {"A": RED, "B": YELLOW, "C": GREEN}
+    for sc in ["A", "B", "C"]:
+        e = _HUMAN_EFFORT_TABLE[sc]
+        row = [
+            _SCENARIO_LABELS[sc],
+            e["nivel"],
+            e["setup_horas"],
+            str(e["iteracoes_prompt"]),
+            e["prompt_engineering"],
+        ]
+        print(_c(colors[sc], "  ".join(v.ljust(w) for v, w in zip(row, col_w))))
+    print()
+    print(_c(DIM, "  * Esforço humano é estimativo e pode ser ajustado manualmente no código."))
+
+
 def _print_summary(results: List[Dict], topic: str, count: int, runs: int) -> None:
     by_sc: Dict[str, List[Dict]] = {"A": [], "B": [], "C": []}
     for r in results:
@@ -606,12 +709,13 @@ def _print_summary(results: List[Dict], topic: str, count: int, runs: int) -> No
     print()
 
     headers = ["Cenário", "Tempo (s)", "Nós", "Tot-Rels", "LLM-Rels", "Tipos", "Domínios", "Aderência"]
-    col_w   = [22, 13, 7, 10, 10, 7, 10, 12]
+    col_w   = [38, 13, 7, 10, 10, 7, 10, 12]
     print(_c(BOLD, "  ".join(h.ljust(w) for h, w in zip(headers, col_w))))
-    print(_c(DIM,  "─" * 102))
+    print(_c(DIM,  "─" * 115))
 
     rows_data = []
-    for sc, label in [("A", "A (script baseline)"), ("B", "B (prompt básico)"), ("C", "C (prompt otim.)")]:
+    for sc in ["A", "B", "C"]:
+        label = _SCENARIO_LABELS[sc]
         sc_r = by_sc[sc]
         if not sc_r:
             continue
@@ -623,7 +727,7 @@ def _print_summary(results: List[Dict], topic: str, count: int, runs: int) -> No
         dm_m, _     = _stats([float(r["unique_domains"]) for r in sc_r])
         ad_m, ad_s  = _stats([r["theme_adherence_pct"] for r in sc_r])
 
-        color = BLUE if sc == "A" else (YELLOW if sc == "B" else GREEN)
+        color = RED if sc == "A" else (YELLOW if sc == "B" else GREEN)
         row   = [label, f"{t_m} ±{t_s}", f"{n_m:.0f}",
                  f"{trl_m:.1f} ±{trl_s:.1f}", f"{rl_m:.1f} ±{rl_s:.1f}", f"{tp_m:.0f}", f"{dm_m:.0f}", f"{ad_m:.0f}% ±{ad_s:.0f}%"]
         rows_data.append((sc, rl_m, tp_m, ad_m))
@@ -631,22 +735,19 @@ def _print_summary(results: List[Dict], topic: str, count: int, runs: int) -> No
 
     print()
     if len(rows_data) >= 2:
-        # Busca C vs baseline (que pode ser B ou A)
         sc_c = next((r for r in rows_data if r[0] == "C"), None)
-        sc_b = next((r for r in rows_data if r[0] == "B"), None)
-        baseline = sc_b or next((r for r in rows_data if r[0] == "A"), None)
-        
+        baseline = next((r for r in rows_data if r[0] == "A"), None)
+
         if sc_c and baseline:
             c_rl, c_tp, c_ad = sc_c[1], sc_c[2], sc_c[3]
             b_rl, b_tp, b_ad = baseline[1], baseline[2], baseline[3]
-            b_label = baseline[0]
-            
+
             wins = []
             if c_rl > b_rl: wins.append(f"+{c_rl-b_rl:.1f} relacionamentos")
             if c_tp > b_tp: wins.append(f"+{c_tp-b_tp:.0f} tipos distintos")
             if c_ad > b_ad: wins.append(f"+{c_ad-b_ad:.0f}% aderência")
             if wins:
-                print(_c(GREEN, f"  ✓ Prompt otimizado (C): {', '.join(wins)} vs baseline ({b_label})"))
+                print(_c(GREEN, f"  ✓ DSPy Otimizado (C): {', '.join(wins)} vs Modelo Cru (A)"))
             else:
                 print(_c(YELLOW, "  ⚠ Diferença pequena neste run. Tente --runs 3 para mais estabilidade."))
 
@@ -678,8 +779,9 @@ def _print_explainer(results: List[Dict]) -> None:
         if r["scenario"] in by_sc:
             by_sc[r["scenario"]].append(r)
 
-    for sc, label, color in [("B", "Prompt Básico (sem contexto, sem tipos de relação)", YELLOW),
-                               ("C", "Prompt Otimizado (com exemplos + tipos + critérios)", GREEN)]:
+    for sc, label, color in [("A", "Modelo Cru (zero-shot, sem instruções)", RED),
+                               ("B", "Prompt Básico (JSON + apenas RELATED_TO)", YELLOW),
+                               ("C", "DSPy Otimizado (exemplos + tipos + critérios + compilado)", GREEN)]:
         sc_results = by_sc[sc]
         if not sc_results:
             continue
@@ -763,14 +865,14 @@ def main():
     scenarios = list(args.scenario)
 
     print()
-    print(_c(BOLD + CYAN, "╔══════════════════════════════════════════════════════╗"))
-    print(_c(BOLD + CYAN, "║       TCC — Avaliação de Prompt Engineering          ║"))
-    print(_c(BOLD + CYAN, "║  A = baseline s/ IA | B = prompt cru | C = otimizado ║"))
-    print(_c(BOLD + CYAN, "╚══════════════════════════════════════════════════════╝"))
-    print(f"  {_c(BOLD, 'Questão:')}     Engenharia de prompt faz diferença na geração de grafos?")
-    print(f"  {_c(BLUE,   'A (script):')}  Copia direto do dataset + conecta só com regras fixas")
-    print(f"  {_c(YELLOW, 'B (cru):')}     \"Gere {count} requisitos sobre {args.topic}.\"")
-    print(f"  {_c(GREEN,  'C (otim.):')}   Especialista RE + JSON + exemplos + tipos de rel. + critérios")
+    print(_c(BOLD + CYAN, "╔══════════════════════════════════════════════════════════════╗"))
+    print(_c(BOLD + CYAN, "║       TCC — Avaliação de Prompt Engineering (Grafos RAG)     ║"))
+    print(_c(BOLD + CYAN, "║  A = Cru (zero-shot) | B = RELATED_TO | C = DSPy Otimizado   ║"))
+    print(_c(BOLD + CYAN, "╚══════════════════════════════════════════════════════════════╝"))
+    print(f"  {_c(BOLD, 'Questão:')} Engenharia de prompt faz diferença na geração de grafos RAG?")
+    print(f"  {_c(RED,    'A (cru):')}    Zero-shot — sem JSON, sem tipos, sem exemplos. O modelo decide tudo.")
+    print(f"  {_c(YELLOW, 'B (básico):')} JSON + RELATED_TO — estrutura definida, tipo de rel. único.")
+    print(f"  {_c(GREEN,  'C (DSPy):')}   Especialista RE + JSON + exemplos + tipos + critérios + compilado.")
     print()
     print(f"  {_c(BOLD, 'Tema:')}       {args.topic}")
     print(f"  {_c(BOLD, 'Nós/grafo:')} {count}")
@@ -798,12 +900,7 @@ def main():
         sc = sc.upper()
         if sc not in ["A", "B", "C"]: continue
         
-        if sc == "A":
-            sc_label = "A — Baseline Script (sem IA, cópia do dataset)"
-        elif sc == "B":
-            sc_label = "B — Prompt básico (sem contexto, tipo único RELATED_TO)"
-        else:
-            sc_label = "C — Prompt otimizado (tipos: DEPENDS_ON, EXTENDS, CONFLICTS_WITH...)"
+        sc_label = _SCENARIO_LABELS.get(sc, sc)
         print(_c(BOLD, f"\n── Cenário {sc_label}"))
 
         for i in range(args.runs):
@@ -830,6 +927,7 @@ def main():
 
     _print_summary(all_results, args.topic, count, args.runs)
     _print_explainer(all_results)
+    _print_effort_table()
 
     # ─── Salva JSON ───────────────────────────────────────────────────────────
     output = {
@@ -837,7 +935,9 @@ def main():
             "topic": args.topic, "count": count, "runs": args.runs,
             "scenarios": scenarios, "model": config.DSPY_MODEL,
             "timestamp": datetime.now().isoformat(),
-            "note": "LLM infers both requirements AND relationships",
+            "note": "A=Modelo Cru(zero-shot) | B=Básico(RELATED_TO) | C=DSPy Otimizado",
+            "scenario_descriptions": _SCENARIO_LABELS,
+            "human_effort": _HUMAN_EFFORT_TABLE,
         },
         "results": all_results,
     }
