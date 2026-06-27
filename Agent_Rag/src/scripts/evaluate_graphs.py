@@ -37,6 +37,10 @@ from typing import List, Dict, Any, Optional, Tuple
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 import dspy
+import numpy as np
+import networkx as nx
+from networkx.algorithms.community import louvain_communities
+from sklearn.metrics.pairwise import cosine_similarity
 
 from src.infra.neo4j.client import Neo4jClient
 from src import config
@@ -436,13 +440,30 @@ def _save_requirements(
     gid: str,
     name: str,
     reqs: List[Dict],
-) -> List[Tuple[str, Dict]]:
-    """Salva requisitos e retorna lista de (req_id, req_dict) para inferência de rels."""
+) -> Tuple[List[Tuple[str, Dict]], List[List[float]]]:
+    """Salva requisitos com embeddings locais e retorna lista de (req_id, req_dict)."""
     client.create_graph_meta(gid, name)
     safe = re.sub(r"[^a-z0-9]", "_", gid[:8])
+
+    # Garante que o índice vetorial local existe
+    try:
+        from src.infra.embeddings import ensure_local_vector_index, embed_batch, LOCAL_EMBEDDING_MODEL
+        ensure_local_vector_index(client)
+        # Gera todos os embeddings em batch (muito mais rápido que um a um)
+        texts = [req.get("text", "") for req in reqs]
+        print(f"  [embeddings] Gerando {len(texts)} embeddings locais...")
+        embeddings = embed_batch(texts)
+        print(f"  [embeddings] ✓ {len(embeddings)} embeddings prontos")
+        use_embeddings = True
+    except Exception as e:
+        print(f"  [embeddings] ⚠ Falha ao gerar embeddings: {e}. Salvando sem vetor.")
+        embeddings = [[] for _ in reqs]
+        use_embeddings = False
+
     reqs_with_ids: List[Tuple[str, Dict]] = []
     for i, req in enumerate(reqs):
         req_id = f"REQ_{safe}{i:03d}_{int(time.time()*100)%10**6:06d}"
+        emb = embeddings[i] if use_embeddings else []
         client.create_requirement(
             req_id=req_id,
             text=req.get("text", ""),
@@ -450,11 +471,14 @@ def _save_requirements(
             req_type=req.get("type", "funcional"),
             domain=req.get("domain", "geral"),
             source="eval_generated",
-            embedding=[],
+            embedding=[],       # campo original (1536 dims OpenAI) — mantido vazio
             graph_id=gid,
         )
+        # Salva o embedding local (384 dims) separadamente
+        if use_embeddings and emb:
+            client.set_local_embedding(req_id, emb)
         reqs_with_ids.append((req_id, req))
-    return reqs_with_ids
+    return reqs_with_ids, embeddings
 
 
 def _save_llm_relationships(
@@ -477,7 +501,16 @@ def _save_llm_relationships(
 
         # Mapeia o ID retornado pelo LLM → req_id real do Neo4j
         from_id = req_id_map.get(from_key)
+        if not from_id:
+            matches = [k for k in req_id_map.keys() if from_key and (k.startswith(from_key) or from_key in k)]
+            if len(matches) == 1:
+                from_id = req_id_map[matches[0]]
+
         to_id   = req_id_map.get(to_key)
+        if not to_id:
+            matches = [k for k in req_id_map.keys() if to_key and (k.startswith(to_key) or to_key in k)]
+            if len(matches) == 1:
+                to_id = req_id_map[matches[0]]
 
         if not from_id or not to_id or from_id == to_id:
             continue
@@ -494,6 +527,61 @@ def _save_llm_relationships(
         except Exception:
             pass
     return count
+
+def _build_similarity_edges(
+    client: Neo4jClient,
+    gid: str,
+    req_ids: List[str],
+    embeddings: List[List[float]],
+    tau: float,
+) -> int:
+    mat = np.array(embeddings, dtype=float)
+    if mat.ndim != 2 or mat.shape[0] < 2:
+        return 0
+    sim = cosine_similarity(mat)
+    n = len(req_ids)
+    count = 0
+    for i in range(n):
+        for j in range(i + 1, n):
+            if sim[i, j] >= tau:
+                client.run(
+                    "MATCH (a:Requirement {req_id:$a, graph_id:$gid}), "
+                    "(b:Requirement {req_id:$b, graph_id:$gid}) "
+                    "MERGE (a)-[:SIMILAR_TO {score:$score, source:'cosine'}]->(b)",
+                    {"a": req_ids[i], "b": req_ids[j], "gid": gid, "score": round(float(sim[i, j]), 4)},
+                )
+                count += 1
+    return count
+
+def _run_louvain(
+    client: Neo4jClient,
+    gid: str,
+    req_ids: List[str],
+    embeddings: List[List[float]],
+    tau: float,
+) -> Tuple[int, float]:
+    mat = np.array(embeddings, dtype=float)
+    if mat.ndim != 2 or mat.shape[0] < 2:
+        return 0, 0.0
+    sim = cosine_similarity(mat)
+    n = len(req_ids)
+    G = nx.Graph()
+    G.add_nodes_from(req_ids)
+    for i in range(n):
+        for j in range(i + 1, n):
+            if sim[i, j] >= tau:
+                G.add_edge(req_ids[i], req_ids[j], weight=float(sim[i, j]))
+    if G.number_of_edges() == 0:
+        return 0, 0.0
+    communities = louvain_communities(G, seed=42)
+    modularity = nx.community.modularity(G, communities)
+    for comm_id, community in enumerate(communities):
+        for req_id in community:
+            client.run(
+                "MATCH (r:Requirement {req_id:$req_id, graph_id:$gid}) SET r.communityId = $cid",
+                {"req_id": req_id, "gid": gid, "cid": comm_id},
+            )
+    return len(communities), modularity
 
 
 # ─── Métricas ─────────────────────────────────────────────────────────────────
@@ -565,10 +653,17 @@ def _run_scenario(
 
     # ── 2. Salva nós no Neo4j ─────────────────────────────────────────────────
     t1 = time.time()
-    reqs_with_ids = _save_requirements(client, gid, name, reqs)
+    reqs_with_ids, embs = _save_requirements(client, gid, name, reqs)
     req_id_map: Dict[str, str] = {}
     for real_id, _ in reqs_with_ids:
         req_id_map[real_id] = real_id
+    
+    # ── Executa Similaridade e Louvain para geração de comunidades ────────────
+    print(f"  {_c(CYAN, '  → detectando comunidades (Louvain)...')}")
+    req_ids = [r_id for r_id, _ in reqs_with_ids]
+    _build_similarity_edges(client, gid, req_ids, embs, tau=0.82)
+    _run_louvain(client, gid, req_ids, embs, tau=0.82)
+
     save_req_time = round(time.time() - t1, 2)
 
     # ── 3. Conecta conceitos estáticos (regras fixas) ──────────────────────────
