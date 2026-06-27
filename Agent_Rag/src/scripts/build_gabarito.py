@@ -18,6 +18,8 @@ import argparse
 import ast
 import time
 import re
+import json
+from datetime import datetime
 from typing import List, Dict, Tuple, Any
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
@@ -388,6 +390,62 @@ def main():
     print()
     print(_c(DIM, f"  Para avaliar os cenários contra este gabarito:"))
     print(_c(DIM, f"  python -m src.scripts.evaluate_graphs --topic \"{args.topic}\" --gabarito-gid {gid!r}"))
+    print()
+
+    # ─── Export JSON ─────────────────────────────────────────────────────────
+    print(_c(CYAN, "── [5/5] Exportando JSON de estatísticas do Gabarito..."))
+    
+    rows_rel = client.run(
+        "MATCH (:Requirement {graph_id:$gid})-[r]->() RETURN type(r) AS t, count(r) AS c",
+        {"gid": gid}
+    )
+    rel_breakdown = {row["t"]: row["c"] for row in rows_rel}
+    total_rels = sum(rel_breakdown.values())
+    
+    nodes = len(req_ids)
+    graph_density = round(total_rels / (nodes * (nodes - 1)), 4) if nodes >= 2 else 0.0
+    
+    rows_dom = client.run("MATCH (r:Requirement {graph_id:$gid}) RETURN count(DISTINCT r.domain) AS c", {"gid": gid})
+    unique_domains = rows_dom[0]["c"] if rows_dom else 1
+
+    results = [{
+        "scenario": "Gabarito",
+        "run": 1,
+        "graph_id": gid,
+        "time_gen_s": 0.0,
+        "time_rel_s": round(t5 - t0, 2),
+        "time_total_s": round(t5 - t0, 2),
+        "nodes": nodes,
+        "llm_relationships": 0,
+        "llm_rel_types": [],
+        "total_relationships": total_rels,
+        "rel_breakdown": rel_breakdown,
+        "graph_density": graph_density,
+        "unique_domains": unique_domains,
+        "theme_adherence_pct": 100.0,
+        "sample_req": "",
+        "reqs_generated": nodes,
+        "chain_of_thought_gen": [],
+        "chain_of_thought_rel": [],
+        "llm_rel_sample": []
+    }]
+    
+    output = {
+        "meta": {
+            "topic": args.topic, "count": nodes, "runs": 1, "scenarios": ["Gabarito"],
+            "model": "cosine_similarity_louvain",
+            "timestamp": datetime.now().isoformat(),
+            "note": "Gabarito gerado via CSV e Cosine Similarity"
+        },
+        "results": results
+    }
+    
+    auto_dir = os.path.join(os.path.dirname(__file__), "..", "..", "results")
+    os.makedirs(auto_dir, exist_ok=True)
+    save_path = os.path.join(auto_dir, "gabarito_stats.json")
+    with open(save_path, "w", encoding="utf-8") as f:
+        json.dump(output, f, ensure_ascii=False, indent=2)
+    print(_c(GREEN, f"  ✓ Estatísticas salvas em {save_path}"))
     print()
 
     client.close()
