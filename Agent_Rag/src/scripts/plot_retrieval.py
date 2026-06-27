@@ -111,10 +111,10 @@ def main():
     plot_metric(df_avg, 'score', 'Qualidade Semântica (Score Juiz LLM)', 'Score (0.0 a 1.0)', 'retrieval_score.png', out_dir, 'Greens_d', '{:.2f}')
     
     # 2. Plot Tempo
-    plot_metric(df_avg, 'time_s', 'Tempo Médio de Resposta (Retrieval)', 'Tempo (segundos)', 'retrieval_tempo.png', out_dir, 'Blues_d', '{:.1f}s')
+    plot_metric(df_avg, 'time_s', 'Tempo Médio de Resposta (Menor é Melhor)', 'Tempo (segundos)', 'retrieval_tempo.png', out_dir, 'Blues_d', '{:.1f}s')
     
     # 3. Plot Nós
-    plot_metric(df_avg, 'num_nodes', 'Volume de Contexto (Nós Acessados)', 'Quantidade de Nós', 'retrieval_nos.png', out_dir, 'Oranges_d', '{:.1f}')
+    plot_metric(df_avg, 'num_nodes', 'Volume de Contexto Exploratório (Nós)', 'Quantidade de Nós', 'retrieval_nos.png', out_dir, 'Oranges_d', '{:.1f}')
     
     print(f"Plots saved successfully in {out_dir}!")
 

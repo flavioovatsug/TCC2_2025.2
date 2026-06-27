@@ -41,6 +41,8 @@ def get_scenario_names(scenarios):
             names.append('Cenário B\n(Prompt Básico)')
         elif s == 'C':
             names.append('Cenário C\n(DSPy Otimizado)')
+        elif s == 'Gabarito':
+            names.append('Gabarito\n(Gold Standard)')
         else:
             names.append(s)
     return names
@@ -48,7 +50,7 @@ def get_scenario_names(scenarios):
 def plot_time(time_agg, out_dir):
     plt.figure(figsize=(8, 6))
     scenarios = get_scenario_names(time_agg['scenario'])
-    ax = sns.barplot(x=scenarios, y=time_agg['time_total_s'], palette="Blues_d")
+    ax = sns.barplot(x=scenarios, y=time_agg['time_total_s'], hue=scenarios, legend=False, palette="Blues_d")
     
     plt.title('Tempo Médio de Execução por Cenário', pad=20, fontsize=14, fontweight='bold')
     plt.ylabel('Tempo (segundos)')
@@ -62,43 +64,25 @@ def plot_time(time_agg, out_dir):
     plt.close()
 
 def plot_relationships(rels_agg, out_dir):
-    plt.figure(figsize=(9, 6))
+    plt.figure(figsize=(8, 6))
     scenarios = get_scenario_names(rels_agg['scenario'])
+    ax = sns.barplot(x=scenarios, y=rels_agg['llm_relationships'], hue=scenarios, legend=False, palette="Reds_d")
     
-    x = np.arange(len(scenarios))
-    width = 0.35
+    plt.title('Arestas Semânticas Inferidas pela IA (Maior é Melhor)', pad=20, fontsize=14, fontweight='bold')
+    plt.ylabel('Quantidade de Arestas (Média)')
+    plt.xlabel('Cenário')
     
-    fig, ax = plt.subplots(figsize=(9, 6))
-    rects1 = ax.bar(x - width/2, rels_agg['total_relationships'], width, label='Total de Relacionamentos', color='#3498db')
-    rects2 = ax.bar(x + width/2, rels_agg['llm_relationships'], width, label='Relacionamentos Inferidos (IA)', color='#e74c3c')
-    
-    ax.set_ylabel('Quantidade (Média)')
-    ax.set_title('Conexões Geradas: Totais vs Inferência Semântica', pad=20, fontsize=14, fontweight='bold')
-    ax.set_xticks(x)
-    ax.set_xticklabels(scenarios)
-    ax.legend()
-    
-    def autolabel(rects):
-        for rect in rects:
-            height = rect.get_height()
-            if height > 0 or rects == rects1:
-                ax.annotate(f'{height:.1f}',
-                            xy=(rect.get_x() + rect.get_width() / 2, height),
-                            xytext=(0, 3),  
-                            textcoords="offset points",
-                            ha='center', va='bottom', fontweight='bold')
-
-    autolabel(rects1)
-    autolabel(rects2)
-    
-    fig.tight_layout()
+    for i, v in enumerate(rels_agg['llm_relationships']):
+        ax.text(i, v + (max(rels_agg['llm_relationships']) * 0.02), f'{v:.1f}', ha='center', va='bottom', fontweight='bold')
+        
+    plt.tight_layout()
     plt.savefig(os.path.join(out_dir, 'relacionamentos_comparacao.png'), dpi=300)
     plt.close()
 
 def plot_relationship_types(types_agg, out_dir):
     plt.figure(figsize=(8, 6))
     scenarios = get_scenario_names(types_agg['scenario'])
-    ax = sns.barplot(x=scenarios, y=types_agg['num_llm_types'], palette="viridis")
+    ax = sns.barplot(x=scenarios, y=types_agg['num_llm_types'], hue=scenarios, legend=False, palette="viridis")
     
     plt.title('Diversidade Semântica (Tipos de Relacionamento IA)', pad=20, fontsize=14, fontweight='bold')
     plt.ylabel('Quantidade de Tipos Distintos')
@@ -113,13 +97,20 @@ def plot_relationship_types(types_agg, out_dir):
 
 def main():
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    json_path = os.path.join(base_dir, 'results', 'tarefas_final.json')
+    json_path = os.path.join(base_dir, 'results', 'geracao_nova_corrigida.json')
+    gabarito_path = os.path.join(base_dir, 'results', 'gabarito_stats.json')
     out_dir = os.path.join(base_dir, 'results', 'plots')
     
     os.makedirs(out_dir, exist_ok=True)
     
     print(f"Reading data from {json_path}...")
     data = load_data(json_path)
+    
+    if os.path.exists(gabarito_path):
+        print(f"Reading data from {gabarito_path}...")
+        gabarito_data = load_data(gabarito_path)
+        data['results'].extend(gabarito_data['results'])
+
     
     time_agg, rels_agg, types_agg, density_agg = aggregate_data(data)
     
