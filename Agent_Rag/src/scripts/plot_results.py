@@ -68,7 +68,7 @@ def plot_relationships(rels_agg, out_dir):
     scenarios = get_scenario_names(rels_agg['scenario'])
     ax = sns.barplot(x=scenarios, y=rels_agg['llm_relationships'], hue=scenarios, legend=False, palette="Reds_d")
     
-    plt.title('Arestas Semânticas Inferidas pela IA (Maior é Melhor)', pad=20, fontsize=14, fontweight='bold')
+    plt.title('Arestas Semânticas Inferidas pela IA', pad=20, fontsize=14, fontweight='bold')
     plt.ylabel('Quantidade de Arestas (Média)')
     plt.xlabel('Cenário')
     
