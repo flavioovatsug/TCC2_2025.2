@@ -1,18 +1,21 @@
 import type { GraphData, GraphMeta, SSEEvent } from "./types";
 
-const WS_BASE = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws/chat`;
+const API_URL = import.meta.env.PROD ? "https://tcc-back-7x28.onrender.com" : "";
+const WS_BASE = import.meta.env.PROD 
+  ? "wss://tcc-back-7x28.onrender.com/ws/chat" 
+  : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws/chat`;
 
 export async function fetchGraph(
   limit = 200,
   graphId = "default",
 ): Promise<GraphData> {
-  const res = await fetch(`/api/graph?limit=${limit}&graph_id=${graphId}`);
+  const res = await fetch(`${API_URL}/api/graph?limit=${limit}&graph_id=${graphId}`);
   if (!res.ok) throw new Error(`Graph API error: ${res.status}`);
   return res.json();
 }
 
 export async function fetchGraphs(): Promise<GraphMeta[]> {
-  const res = await fetch("/api/graphs");
+  const res = await fetch(`${API_URL}/api/graphs");
   if (!res.ok) throw new Error(`Graphs API error: ${res.status}`);
   return res.json();
 }
@@ -20,7 +23,7 @@ export async function fetchGraphs(): Promise<GraphMeta[]> {
 export async function createGraph(
   name: string,
 ): Promise<GraphMeta & { graph_id: string }> {
-  const res = await fetch("/api/graphs", {
+  const res = await fetch(`${API_URL}/api/graphs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
