@@ -279,34 +279,36 @@ export default function GraphPanel({
       {/* Force Graph */}
       <div
         ref={canvasRef}
-        style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
+        style={{ flex: 1, position: "relative", minHeight: 0, overflow: "hidden" }}
       >
-        <ForceGraph2D
-          graphData={filteredData as any}
-          width={dimensions.width}
-          height={dimensions.height}
-          backgroundColor="#0a0a0f"
-          nodeId="id"
-          nodeLabel={(n: any) => `[${n.label}] ${n.name || n.id}`}
-          nodeCanvasObject={paintNode as any}
-          nodePointerAreaPaint={(node: any, color, ctx) => {
-            const r = (NODE_SIZES[node.label] ?? 5) * 2;
-            ctx.beginPath();
-            ctx.arc(node.x ?? 0, node.y ?? 0, r, 0, Math.PI * 2);
-            ctx.fillStyle = color;
-            ctx.fill();
-          }}
-          linkColor={linkColor as any}
-          linkWidth={linkWidth as any}
-          linkDirectionalArrowLength={(l: any) =>
-            l.type !== "SIMILAR_TO" ? 3 : 0
-          }
-          linkDirectionalArrowRelPos={1}
-          onNodeClick={handleNodeClick}
-          d3AlphaDecay={0.02}
-          d3VelocityDecay={0.3}
-          cooldownTicks={200}
-        />
+        <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
+          <ForceGraph2D
+            graphData={filteredData as any}
+            width={dimensions.width}
+            height={dimensions.height}
+            backgroundColor="#0a0a0f"
+            nodeId="id"
+            nodeLabel={(n: any) => `[${n.label}] ${n.name || n.id}`}
+            nodeCanvasObject={paintNode as any}
+            nodePointerAreaPaint={(node: any, color, ctx) => {
+              const r = (NODE_SIZES[node.label] ?? 5) * 2;
+              ctx.beginPath();
+              ctx.arc(node.x ?? 0, node.y ?? 0, r, 0, Math.PI * 2);
+              ctx.fillStyle = color;
+              ctx.fill();
+            }}
+            linkColor={linkColor as any}
+            linkWidth={linkWidth as any}
+            linkDirectionalArrowLength={(l: any) =>
+              l.type !== "SIMILAR_TO" ? 3 : 0
+            }
+            linkDirectionalArrowRelPos={1}
+            onNodeClick={handleNodeClick}
+            d3AlphaDecay={0.02}
+            d3VelocityDecay={0.3}
+            cooldownTicks={200}
+          />
+        </div>
       </div>
 
       {/* Node detail panel */}
