@@ -87,11 +87,13 @@ export default function GraphPanel({
     if (!el) return;
     const observer = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
-      setDimensions({ width, height });
+      if (width > 0 && height > 0) {
+        setDimensions({ width, height });
+      }
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [loading, error, graphData.nodes.length]);
 
   // Filtered graph (memoized)
   const filteredData = useMemo(() => {
