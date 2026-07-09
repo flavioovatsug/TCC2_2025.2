@@ -16,7 +16,7 @@ export async function fetchGraph(
 }
 
 export async function fetchGraphs(): Promise<GraphMeta[]> {
-  const res = await fetch(`${API_URL}/api/graphs");
+  const res = await fetch(`${API_URL}/api/graphs`);
   if (!res.ok) throw new Error(`Graphs API error: ${res.status}`);
   return res.json();
 }
@@ -24,7 +24,7 @@ export async function fetchGraphs(): Promise<GraphMeta[]> {
 export async function createGraph(
   name: string,
 ): Promise<GraphMeta & { graph_id: string }> {
-  const res = await fetch(`${API_URL}/api/graphs", {
+  const res = await fetch(`${API_URL}/api/graphs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
