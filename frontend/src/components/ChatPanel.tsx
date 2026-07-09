@@ -25,7 +25,7 @@ export default function ChatPanel({
     id: "welcome",
     role: "agent",
     content:
-      "Olá! Sou um especialista em **Engenharia de Requisitos** com acesso ao grafo de conhecimento.\n\nPosso ajudar com:\n- Buscar requisitos específicos\n- Explicar técnicas de elicitação\n- Analisar padrões nos requisitos\n- Explicar conceitos de ER\n\nO que deseja saber?",
+      "Olá! Sou um especialista em **Engenharia de Requisitos** com acesso ao grafo de conhecimento.\n\nPosso ajudar com:\n- Buscar requisitos específicos\n- Explicar técnicas de elicitação\n- Analisar padrões nos requisitos\n- Explicar conceitos de ER\n\n**Para testar, experimente copiar e colar:**\n> *Crie 20 requisitos sobre um e-commerce*",
   };
   const [messages, setMessages] = useState<Message[]>(
     initialMessages && initialMessages.length > 0 ? initialMessages : [WELCOME],
