@@ -1,9 +1,10 @@
 import type { GraphData, GraphMeta, SSEEvent } from "./types";
 
-const API_URL = import.meta.env.PROD ? "https://tcc-back-7x28.onrender.com" : "";
-const WS_BASE = import.meta.env.PROD 
-  ? "wss://tcc-back-7x28.onrender.com/ws/chat" 
-  : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws/chat`;
+const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+const API_URL = isLocal ? "" : "https://tcc-back-7x28.onrender.com";
+const WS_BASE = isLocal 
+  ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws/chat`
+  : "wss://tcc-back-7x28.onrender.com/ws/chat";
 
 export async function fetchGraph(
   limit = 200,
